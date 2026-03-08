@@ -2,17 +2,12 @@
 
 mod animal_fields;
 mod animal_utils;
-// mod complexity_utils;
 mod streaming_features;
 mod yolos_utils;
 
 use crate::streaming_features::{FftBuffers, TimingStats};
-use rustfft::Fft;
 
 use dashmap::DashMap;
-use futures::StreamExt;
-use image::RgbImage;
-use rand::seq::SliceRandom;
 use rand::Rng;
 use watershed_shared::async_query_builder::FunctionKinds;
 use watershed_shared::async_query_builder::PhysicalOperator;
@@ -26,8 +21,8 @@ use watershed_shared::query_builder::QueryDescriptor;
 use watershed_shared::scheduler::AsyncPipeSendError;
 use watershed_shared::scheduler::{
     self,
-    basic_probability_forecast::{BasicCategory, History, PastData},
-    AlgInputs, BinInfo, FutureWindowKind, ShareableArray,
+    basic_probability_forecast::{History, PastData},
+    AlgInputs, BinInfo, FutureWindowKind,
 };
 use watershed_shared::start_python_with_modules;
 use watershed_shared::{query_builder, AsyncPipe, Operator, UdfBolt};
@@ -43,8 +38,6 @@ use serde::{Deserialize, Serialize};
 use log::{debug, error, info, trace, warn};
 
 use std::collections::BTreeMap;
-
-use std::collections::BTreeSet;
 use std::env::args;
 
 use std::sync::atomic::{self, AtomicUsize};
@@ -1632,154 +1625,9 @@ fn async_main() -> anyhow::Result<()> {
     }
     std::thread::sleep(Duration::from_millis(1000));
 
-    // TODO: allow the user to specify the file name and then this should flush any remaining data
-    // binary encode the starting info
-    // let starting_info = starting_info.lock().unwrap();
-    // let starting_info_encoded = rmp_serde::to_vec(&*starting_info)?;
-    // let mut starting_info_file = std::fs::File::create("starting_info.rmp")?;
-    // starting_info_file.write_all(&starting_info_encoded)?;
-
-    // let merge_info = merge_info.lock().unwrap();
-    // let merge_info_encoded = rmp_serde::to_vec(&*merge_info)?;
-    // let mut merge_info_file = std::fs::File::create("merge_info.rmp")?;
-    // merge_info_file.write_all(&merge_info_encoded)?;
-
     info!("finished executing");
     info!("no op counter status: {no_op_counts:?}");
     Ok(())
-}
-
-fn paths_to_ndarrays(
-    base_folder: String,
-    image_paths: impl Send + Iterator<Item = ImageInfo>,
-) -> impl Iterator<Item = Tuple> {
-    let path = std::path::PathBuf::from(base_folder);
-    // load all images first and then later make the tuples
-    // this is to avoid the tuples having very early creation times that count against them later
-    use rayon::prelude::*;
-    let mut images: Vec<_> = image_paths
-        .enumerate()
-        .par_bridge()
-        .flat_map(move |(img_idx, image_info)| {
-            let mut path = path.clone();
-            path.push(&image_info.img_path);
-            let full_path: &std::path::Path = &path;
-
-            let img = match image::open(full_path) {
-                Ok(img) => img.to_rgb8(),
-                Err(e) => {
-                    error!("Failed to open image {:?} with error: {:?}", full_path, e);
-                    // pop file
-                    path.pop();
-                    // pop person
-                    path.pop();
-                    return None;
-                }
-            };
-            // pop file
-            path.pop();
-            // pop person
-            path.pop();
-            Some((img_idx, image_info, img))
-        })
-        .collect();
-    // we have to correct the order because the parallel iteration did not preserve it
-    images.sort_by_key(|(img_idx, _, _)| *img_idx);
-    let mut last_emit_time = Instant::now();
-    images
-        .into_iter()
-        .filter_map(move |(_img_idx, image_info, img)| {
-            let (width, height) = img.dimensions();
-            let mut tuple = get_tuple();
-            let img_id_key = image_info.img_id.to_key();
-
-            tuple.insert("img_id".into(), HabValue::String(image_info.img_id.into()));
-
-            let buf = img.into_raw();
-            debug!(
-                "image buffer for {:?} with width {width} and height {height} has length {}",
-                &image_info.img_path,
-                buf.len()
-            );
-            // convert into python bytes and then into a numpy array
-            // let py_arr: anyhow::Result<Py<PyAny>> = Python::with_gil(|py| {
-            //     let b = pyo3::types::PyBytes::new(py, &buf);
-            //     let np =
-            //         pyo3::types::PyModule::import(py, "numpy").context("Failed to import numpy")?;
-            //     let arr = np.call_method1("frombuffer", (b, "uint8"))?;
-            //     let arr = arr
-            //         .into_py_any(py)
-            //         .context("Failed to convert to numpy array")?;
-            //     let arr = arr
-            //         .call_method1(py, "reshape", (height as usize, width as usize, 3))
-            //         .context("Failed to reshape numpy array")?;
-            //     let arr = arr.call_method0(py, "copy")?;
-            //     Ok(arr)
-            // });
-            // let py_arr = match py_arr {
-            //     Ok(p) => p,
-            //     Err(e) => {
-            //         error!(
-            //             "Failed to convert image buffer {:?} to numpy array: {:?}",
-            //             &image_info.img_path, e
-            //         );
-            //         return None;
-            //     }
-            // };
-            // tuple.insert("python_array".into(), py_arr.into());
-
-            tuple.insert("image".into(), HabValue::ByteBuffer(buf));
-
-            tuple.insert(
-                "img_path".into(),
-                HabValue::String(image_info.img_path.into()),
-            );
-            tuple.insert(
-                ORIGINAL_IMAGE_SHAPE_FIELD.into(),
-                HabValue::ShapeBuffer(vec![height as usize, width as usize, 3]),
-            );
-            tuple.insert("original_width".into(), HabValue::Integer(width as _));
-            tuple.insert("original_height".into(), HabValue::Integer(height as _));
-            tuple.insert("original_width_float".into(), HabValue::from(width as f64));
-            tuple.insert(
-                "original_height_float".into(),
-                HabValue::from(height as f64),
-            );
-            tuple.insert(
-                "original_area_float".into(),
-                HabValue::from((height * width) as f64),
-            );
-            tuple.insert(
-                "original_hw_ratio_float".into(),
-                HabValue::from((height as f64) / (width as f64)),
-            );
-            let now = Instant::now();
-            let since_last_emit = last_emit_time.elapsed().as_nanos() as f64 / 1_000_000.0;
-            last_emit_time = now;
-            debug!(
-                "created tuple with id {} after {:.3} ms since the last tuple",
-                tuple.id(),
-                since_last_emit
-            );
-            'log_created_image_tuple: {
-                let tuple_id = tuple.id();
-
-                use watershed_shared::global_logger;
-                let log_location = "create_tuple".to_raw_key();
-                let aux_data = Some(std::collections::HashMap::from([(
-                    "image_id".to_raw_key(),
-                    LimitedHabValue::String(img_id_key),
-                )]));
-                if let Err(e) = global_logger::log_data(tuple_id, log_location, aux_data) {
-                    for err in e {
-                        error!("failed to log initial image tuple creation: {err}");
-                    }
-                    break 'log_created_image_tuple;
-                }
-            }
-
-            Some(tuple)
-        })
 }
 
 pub static NEXT_IMAGE_ID_INT: std::sync::atomic::AtomicUsize =

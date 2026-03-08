@@ -578,8 +578,6 @@ pub(crate) fn split_tuple_yolos(mut input: Tuple) -> Vec<Tuple> {
         );
 
         if use_dense {
-            // DENSE FORMAT: Log all 80 YOLO classes (0-79) with zeros for missing ones
-            // This ensures uniform fields across all log entries
             const NUM_YOLO_CLASSES: usize = 80;
             for class_id in 0..NUM_YOLO_CLASSES {
                 let expected_count = expected_counts_map.get(&class_id).copied().unwrap_or(0);
@@ -661,9 +659,8 @@ pub(crate) fn aggregate_count_species(
 ) -> AggregationResult {
     // first cull data based on limit info if needed
 
-    // sort by timestamp
+    // sort by timestamp and cut off old data
     windowed_data.sort_by_key(|t| t.unix_time_created_ns());
-    // compute cutoff time
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
