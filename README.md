@@ -37,6 +37,10 @@ https://github.com/fwang91/IMDb-Face
 This dataset is retreived using the author's script, producing a folder for "clean" faces, and within that a folder for each person's face images. Our program will read from that outer folder and traverse inwards.
 
 
+## Animal Population - COCO
+We use the COCO dataset retrievable from the ultralytics api, filtered to only the animal classes. The image ids have been kept the same, so the files names will match up as long as they are in the animal_data/animal_images folder.
+
+
 # Running
 
 ## Pyhon environment
@@ -82,7 +86,7 @@ cp ./ecg_original_distribution/seed_0_labels.npy ./mini_time_series_generated_se
 ```sh
 cp ./face_original_distribution/IMDB_split_info_seed_0.json ./IMDB_split_info.json
 ```
-For the dat itself, which is referenced within this descriptor file, you will need to have downloaded the relevant piece of the IMDB-Face dataset and stored the clean faces in IMDB_clean_face.
+For the data itself, which is referenced within this descriptor file, you will need to have downloaded the relevant piece of the IMDB-Face dataset and stored the clean faces in IMDB_clean_face.
 
-
-
+## Animal Population
+The deployment scripts will handle deploying to whichever server happens to be in current_vm.txt. The "run" scripts can also run locally (essentially if the data is already located on the server), given the proper files are co-located, including the onnx files for the models.
