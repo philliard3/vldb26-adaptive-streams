@@ -1,0 +1,24 @@
+[workspace]
+name = "adaptive-ml-experiments"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A collection of experiments in machine learning and data processing."
+
+# add members
+members = [
+    "watershed_shared",
+    "face_query",
+    "time_series_query",
+    "gpt_query",
+    "animal_query",
+]
+
+
+resolver = "2"
+workspace.resolver = "2"
+
+[profile.release]
+# debug = true
+overflow-checks = true
+opt-level = 3
