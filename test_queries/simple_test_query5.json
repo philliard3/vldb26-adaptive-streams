@@ -1,0 +1,54 @@
+{
+    "name": "Simple Test Query 5",
+    "description": "This is the fifth test query just to see if we can execute simple expressions. This one inserts things into the DB on one side and ",
+    "sql_form": "SELECT passages FROM table1 CHROMA JOIN embedding_source ON embed(question) TOP 5 embed(passage) as passages",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "udf_source",
+            "name": "embedding_source",
+            "id": 1
+        },
+        {
+            "kind": "derive",
+            "id": 2,
+            "source": 0,
+            "new_field_name": "embedding",
+            "expression": {
+                "kind": "field",
+                "name": "question"
+            }
+        },
+        {
+            "kind": "derive",
+            "id": 3,
+            "source": 1,
+            "new_field_name": "knowledge_base_embedding",
+            "expression": {
+                "kind": "udf",
+                "name": "embed",
+                "args": [{"kind": "field", "name": "passage"}]
+            }
+        },
+        {
+            "kind": "chroma_join",
+            "id": 4,
+            "lookup_stream": 2,
+            "index_stream": 3,
+            "metric": "euclidean",
+            "url": "http://localhost:8000",
+            "collection": "test_collection2",
+            "distance_threshold": 25,
+            "embed_in_db": false,
+            "join_info": {
+                "kind": "inner",
+                "topk": 5,
+                "keep_n_matches": 5
+            }
+        }
+    ]
+}

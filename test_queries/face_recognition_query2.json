@@ -1,0 +1,252 @@
+{
+    "name": "Face Recognition Query 1",
+    "description": "This is the query that accepts images as input, detects faces in each image, embeds each face, compares each face to a database of known faces, blurs each face that is recognized, and returns the combined blurred image. The group by will ensure that only images will only output when all their faces have been processed.",
+    "sql_form": "SELECT combine_faces(total_faces, original_img, face) as combined_image FROM ( SELECT img_id, original_img, (IF face IS NOT NULL blur(face) ELSE face) as face, known_face FROM ( SELECT original_img, img_id, recognize_faces(original_img) as (total_faces, face) FROM ( SELECT original_img, img_id FROM image_source ) OUTER CHROMA JOIN ( SELECT known_face FROM known_faces ) WHERE cosine(face, known_face) < 0.1 ) ) GROUP BY img_id HAVING COUNT(*) = len(first_nonnull(total_faces))",
+    "operators":[
+        {
+            "kind": "udf_source",
+            "name": "image_source",
+            "id": 0
+        },
+        {
+            "description":"recognize_faces(original_img) as (total_faces, face)",
+            "kind": "python_udf",
+            "id": 1,
+            "source": 0,
+            "scripts_dir_path": "../python_scripts",
+            "script_name": "face_detect__dev",
+            "encode_fn": "encode_recognize_faces_input",
+            "decode_fn": "decode_recognize_faces_output",
+            "shutdown_fn": "shutdown_sequence_detect"
+        },
+        {
+            "description": "use routing_fn to decide which embedding model to use",
+            "kind": "channel_router",
+            "id": 2,
+            "source": 1,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "original_width"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "original_height"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "total_faces"
+                    }
+                ]
+            },
+            "routes": [3, 8, 13]
+        },
+        {
+            "description": "route 0, use buffalo_s",
+            "kind": "channel_spout",
+            "id": 3,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "embed face",
+            "kind": "python_udf",
+            "id": 4,
+            "source": 3,
+            "scripts_dir_path": "../python_scripts",
+            "script_name": "face_embedding_buffalo_s",
+            "encode_fn": "encode_embedding_input",
+            "decode_fn": "decode_embedding_output",
+            "shutdown_fn": "shutdown_sequence_embed"
+        },
+        {
+            "description": "build side of the join",
+            "kind": "udf_source",
+            "name": "known_faces",
+            "id": 5
+        },
+        {
+            "kind": "chroma_join",
+            "id": 6,
+            "lookup_stream": 4,
+            "index_stream": 5,
+            "metric": "euclidean",
+            "url": "0.0.0.0:5000",
+            "collection": "buffalo_s_normalized",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "outer_right",
+                "topk": 1,
+                "keep_n_matches": 1
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 7,
+            "source": 6,
+            "parent": 18,
+            "on_merge_fn": "merge_callback_buffalo_s"
+        },
+        
+
+        
+        {
+            "description": "route 1, use buffalo_l",
+            "kind": "channel_spout",
+            "id": 8,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "embed face",
+            "kind": "python_udf",
+            "id": 9,
+            "source": 8,
+            "scripts_dir_path": "../python_scripts",
+            "script_name": "face_embedding_buffalo_l",
+            "encode_fn": "encode_embedding_input",
+            "decode_fn": "decode_embedding_output",
+            "shutdown_fn": "shutdown_sequence_embed"
+        },
+        {
+            "description": "build side of the join",
+            "kind": "udf_source",
+            "name": "known_faces",
+            "id": 10
+        },
+        {
+            "kind": "chroma_join",
+            "id": 11,
+            "lookup_stream": 9,
+            "index_stream": 10,
+            "metric": "euclidean",
+            "url": "0.0.0.0:5000",
+            "collection": "buffalo_l_normalized",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "outer_right",
+                "topk": 1,
+                "keep_n_matches": 1
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 12,
+            "source": 11,
+            "parent": 18,
+            "on_merge_fn": "merge_callback_buffalo_l"
+        },
+
+
+        
+        {
+            "description": "route 2, use facenet",
+            "kind": "channel_spout",
+            "id": 13,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "embed face",
+            "kind": "python_udf",
+            "id": 14,
+            "source": 13,
+            "scripts_dir_path": "../python_scripts",
+            "script_name": "face_embedding_facenet",
+            "encode_fn": "encode_embedding_input",
+            "decode_fn": "decode_embedding_output",
+            "shutdown_fn": "shutdown_sequence_embed"
+        },
+        {
+            "description": "build side of the join",
+            "kind": "udf_source",
+            "name": "known_faces",
+            "id": 15
+        },
+        {
+            "kind": "chroma_join",
+            "id": 16,
+            "lookup_stream": 14,
+            "index_stream": 15,
+            "metric": "euclidean",
+            "url": "0.0.0.0:5000",
+            "collection": "facenet_normalized",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "outer_right",
+                "topk": 1,
+                "keep_n_matches": 1
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 17,
+            "source": 16,
+            "parent": 18,
+            "on_merge_fn": "merge_callback_facenet"
+        },
+
+
+        {
+            "kind": "merge_spout",
+            "id": 18,
+            "sources": [7, 12, 17],
+            "timeout": 10
+        },
+
+        
+        {
+            "kind": "derive",
+            "id": 19,
+            "source": 18,
+            "new_field_name": "first_id",
+            "expression": {
+                "kind": "udf",
+                "name": "get_first_id",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "match_ids"
+                    }
+                ]
+            }
+        },
+        
+        {
+            "kind": "udf_source",
+            "name": "person_info_source",
+            "id": 20
+        },
+
+        {
+            "description": "join with person info. this is an outer join so we don't throw away the important image information that we got for the other cases. we still need to count all the image cases that don't have a match so our groupby knows when to stop.",
+            "kind": "join",
+            "id": 21,
+            "left": 18,
+            "right": 20,
+            "predicate": {
+                "kind": "udf",
+                "name": "always_true_join",
+                "args": []
+            },
+            "join_info": {
+                "kind": "outer_build_right",
+                "fields": ["first_id"]
+            }
+        },
+        
+        {
+            "kind": "group_by",
+            "id": 22,
+            "source": 21,
+            "fields": ["img_id"],
+            "aggregate": {
+                "kind": "udf",
+                "name": "blur_unknown_faces"
+            }
+        }
+    ]
+}

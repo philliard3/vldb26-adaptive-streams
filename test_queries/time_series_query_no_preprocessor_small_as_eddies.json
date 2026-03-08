@@ -1,0 +1,164 @@
+{
+    "name": "time series Query",
+    "description": "This is the query which extracts fft features, classifies the data, groups it by patient_id to get a window, then filters sequences with 3 or more occurences in a row.",
+    "sql_form": "SELECT patient_id, name, label, streak_length FROM (SELECT patient_id, name, label, diagnosis_streak(*) as streak_length FROM (SELECT patient_id, name, sequence_id, classify(route(sequence_data, features)) as label FROM (SELECT patient_id, name, sequence_id, sequence_data, fft_features() as features FROM sequence_inputs) ) GROUP BY patient_id HAVING diagnosis_streak(*) as streak_length >= 3 AND label != 0) JOIN person_info_source ON patient_id",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "sequence_inputs",
+            "id": 0
+        },
+        {
+            "kind": "derive",
+            "id": 1,
+            "source": 0,
+            "new_field_name": "fft_features_output",
+            "expression": {
+                "kind": "literal",
+                "type": "null",
+                "value": null
+            }
+        },
+        {
+            "description": "channel router based on fft_features_output",
+            "kind": "channel_router",
+            "id": 2,
+            "source": 1,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "fft_features_output"
+                    }
+                ]
+            },
+            "routes": [3, 6]
+        },
+        {
+            "description": "spout for left side",
+            "kind": "channel_spout",
+            "id": 3,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description":"derive label for left side using python udf from module \"classify_small\"",
+            "kind": "python_udf",
+            "id": 4,
+            "source": 3,
+            "scripts_dir_path": "../python_scripts",
+            "script_name": "classify_small",
+            "encode_fn": "encode_sequence",
+            "decode_fn": "decode_label",
+            "shutdown_fn": "shutdown_sequence"
+        },
+        {
+            "description": "send back from left side, with a callback on merge named \"merge_callback_left\"",
+            "kind": "merge",
+            "id": 5,
+            "source": 4,
+            "parent": 9,
+            "on_merge_fn": "merge_callback_left"
+        },
+        {
+            "description": "spout for right side",
+            "kind": "channel_spout",
+            "id": 6,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "derive label for right side using python udf from module \"classify_small\"",
+            "kind": "python_udf",
+            "id": 7,
+            "source": 6,
+            "scripts_dir_path": "../python_scripts",
+            "script_name": "classify_small",
+            "encode_fn": "encode_sequence",
+            "decode_fn": "decode_label",
+            "shutdown_fn": "shutdown_sequence"
+        },
+        {
+            "description": "send back from right side, with a callback on merge named \"merge_callback_right\"",
+            "kind": "merge",
+            "id": 8,
+            "source": 7,
+            "parent": 9,
+            "on_merge_fn": "merge_callback_right"
+        },
+        {
+            "description": "merge the two streams of classifications",
+            "kind": "merge_spout",
+            "id": 9,
+            "sources": [5, 8],
+            "timeout": 10
+        },
+        {
+            "kind": "group_by",
+            "id": 10,
+            "source": 9,
+            "fields": ["patient_id"],
+            "aggregate": {
+                "kind": "udf",
+                "name": "diagnosis_streak"
+            }
+        },
+        {
+            "kind": "filter",
+            "id": 11,
+            "source": 10,
+            "predicate": {
+                "kind": "binary",
+                "op": "&",
+                "left": {
+                    "kind": "binary",
+                    "op": ">=",
+                    "left": {
+                        "kind": "field",
+                        "name": "streak_length"
+                    },
+                    "right": {
+                        "kind": "literal",
+                        "type": "int",
+                        "value": 3
+                    }
+                },
+                "right": {
+                    "kind": "binary",
+                    "op": "!=",
+                    "left": {
+                        "kind": "field",
+                        "name": "label"
+                    },
+                    "right": {
+                        "kind": "literal",
+                        "type": "int",
+                        "value": 0
+                    }
+                }
+            }
+        },
+        {
+            "kind": "udf_source",
+            "name": "person_info_source",
+            "id": 12
+        },
+        {
+            "kind": "join",
+            "id": 13,
+            "left": 11,
+            "right": 12,
+            "predicate": {
+                "kind": "udf",
+                "name": "always_true_join",
+                "args": []
+            },
+            "join_info": {
+                "kind": "inner_build_right",
+                "fields": ["patient_id"]
+            }
+        }
+    ]
+}

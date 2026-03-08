@@ -1,0 +1,36 @@
+{
+    "run_order_seed": null,
+    "imdb_split_info_path": "./IMDB_split_info__std_seed0_truncated_1k.json",
+    "preclassifier_path": "./face_preclassifiers/face_overtake_1.json",
+    "imdb_image_path": "../IMDB_temp",
+    "query_path": "./test_queries_deployment/face_recognition_query1__inline_onnx.json",
+    "max_total_samples": 10000,
+    "history_window_size": null,
+    "greedy_lookahead_window_size": 25,
+    "optimal_lookahead_window_size": 5,
+    "lookahead_time_ms": 833,
+    "deadline_window_ms": 250,
+    "target_time_micros": {
+        "type": "Sinusoidal",
+        "upper": 20000,
+        "lower": 8000,
+        "start_at": 16666,
+        "maintain_for": 50,
+        "increasing": true,
+        "increment_by": 500
+    },
+    "input_delay_micros": {
+        "type": "Sinusoidal",
+        "upper": 20000,
+        "lower": 8000,
+        "start_at": 16666,
+        "maintain_for": 50,
+        "increasing": true,
+        "increment_by": 500
+    },
+    "overall_time_limit_ms": 900000,
+    "initial_startup_delay_ms": 5000,
+    "routing_strategy": "aquifer_greedy",
+    "log_folder": null,
+    "model_info_path": "./face_preclassifiers/face_overtake_1.json"
+}

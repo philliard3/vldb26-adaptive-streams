@@ -1,0 +1,38 @@
+{
+  "preclassifier": {
+    "kind": "binary_logistic_regression",
+    "input_type": "image features (height, width, area, ratio)",
+    "num_inputs": 4,
+    "weights": [
+      -0.0050970022375433546,
+      0.0079966543387889,
+      -3.6622780554989356e-06,
+      -0.5116656463265024
+    ],
+    "intercept": 0.09116685609344574
+  },
+  "buckets": [
+    {
+      "class": 0,
+      "rewards": [
+        0.9171270718232044,
+        0.9419889502762431
+      ],
+      "costs": [
+        2.6,
+        9.5
+      ]
+    },
+    {
+      "class": 1,
+      "rewards": [
+        0.927710843373494,
+        0.9748083242059146
+      ],
+      "costs": [
+        2.6,
+        9.5
+      ]
+    }
+  ]
+}

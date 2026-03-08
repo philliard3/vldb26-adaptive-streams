@@ -1,0 +1,18 @@
+{
+    "name": "Simple Test Query 2",
+    "description": "This is the second test query just to see if we can execute simple expressions.",
+    "sql_form": "SELECT field1, field2 FROM table1",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "project",
+            "id": 1,
+            "source": 0,
+            "fields": ["field1", "field2"]
+        }
+    ]
+}

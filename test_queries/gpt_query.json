@@ -1,0 +1,221 @@
+{
+    "name": "GPT Query",
+    "description": "This is the query which embeds a question, looks it up against a knowledge base, and then combines the result to send to GPT, returning the answer.",
+    "sql_form": "SELECT is_yes(llm_response), llm_response FROM (SELECT llm(finalize_question(question, passages)) as llm_response FROM question_source JOIN knowledge_base ON embed(question) TOPK embed(passage) as passages)",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "question_source",
+            "id": 0
+        },
+        {
+            "kind": "derive",
+            "id": 1,
+            "source": 0, 
+            "new_field_name": "__no_op__formerly__question_embedding",
+            "expression": {
+                "kind": "literal",
+                "type": "null",
+                "value": null
+            }
+        },
+        {
+            "kind": "udf_source",
+            "name": "knowledge_base",
+            "id": 2
+        },
+        {
+            "kind": "derive",
+            "id": 3,
+            "source": 2,
+            "new_field_name": "__no_op__formerly__knowledge_base_embedding",
+            "expression": {
+                "kind": "literal",
+                "type": "null",
+                "value": null
+            }
+        },
+        {
+            "kind": "chroma_join",
+            "id": 4,
+            "lookup_stream": 1,
+            "index_stream": 3,
+            "metric": "euclidean",
+            "url": "http://localhost:8000",
+            "collection": "sentence-transformers-all-mpnet-base-v2",
+            "distance_threshold": 1.5,
+            "join_info": {
+                "kind": "inner",
+                "topk": 5,
+                "keep_n_matches": 5
+            }
+        },
+        {
+            "kind": "derive",
+            "id": 5,
+            "source": 4,
+            "new_field_name": "query",
+            "expression": {
+                "kind": "udf",
+                "name": "finalize_question",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "question"
+                    }, 
+                    {
+                        "kind": "field",
+                        "name": "passages"
+                    }
+                ]
+            }
+        },
+        {
+            "description": "use routing_fn to decide which GPT model to use",
+            "kind": "channel_router",
+            "id": 6,
+            "source": 5,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "query"
+                    }
+                ]
+            },
+            "routes": [7, 8, 9]
+        },
+        {
+            "description": "route 0, use small Gemini model",
+            "kind": "channel_spout",
+            "id": 7,
+            "source": 6,
+            "timeout": 10
+        },
+        {
+            "description": "route 1, use large Gemini model",
+            "kind": "channel_spout",
+            "id": 8,
+            "source": 6,
+            "timeout": 10
+        },
+        {
+            "description": "route 2, use large GPT model",
+            "kind": "channel_spout",
+            "id": 9,
+            "source": 6,
+            "timeout": 10
+        },
+        {
+            "kind": "derive",
+            "id": 10,
+            "source": 7,
+            "new_field_name": "llm_response",
+            "expression": {
+                "kind": "udf",
+                "name": "gemini-1.5-flash-8b",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "question_index"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "query"
+                    }
+                ]
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 11,
+            "source": 10,
+            "parent": 16,
+            "on_merge_fn": "merge_callback_one"
+        },
+        {
+            "kind": "derive",
+            "id": 12,
+            "source": 8,
+            "new_field_name": "llm_response",
+            "expression": {
+                "kind": "udf",
+                "name": "gemini-2.0-flash",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "question_index"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "query"
+                    }
+                ]
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 13,
+            "source": 12,
+            "parent": 16,
+            "on_merge_fn": "merge_callback_two"
+        },
+        {
+            "kind": "derive",
+            "id": 14,
+            "source": 9,
+            "new_field_name": "llm_response",
+            "expression": {
+                "kind": "udf",
+                "name": "gpt-4o",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "question_index"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "query"
+                    }
+                ]
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 15,
+            "source": 14,
+            "parent": 16,
+            "on_merge_fn": "merge_callback_three"
+        },
+        {
+            "kind": "merge_spout",
+            "id": 16,
+            "sources": [11, 13, 15],
+            "timeout": 10
+        },
+        {
+            "kind": "derive",
+            "id": 17,
+            "source": 16,
+            "new_field_name": "is_yes(llm_response)",
+            "expression": {
+                "kind": "udf",
+                "name": "is_yes",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "llm_response"
+                    }
+                ]
+            }
+        },
+        {
+            "kind": "project",
+            "id": 18,
+            "source": 17,
+            "fields": ["question_index", "is_yes(llm_response)", "llm_response"]
+        }
+    ]
+}

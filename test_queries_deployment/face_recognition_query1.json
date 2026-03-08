@@ -1,0 +1,240 @@
+{
+    "name": "Face Recognition Query 1",
+    "description": "This is the query that accepts images as input, detects faces in each image, embeds each face, compares each face to a database of known faces, blurs each face that is recognized, and returns the combined blurred image. The group by will ensure that only images will only output when all their faces have been processed.",
+    "sql_form": "SELECT combine_faces(total_faces, original_img, face) as combined_image FROM ( SELECT img_id, original_img, (IF face IS NOT NULL blur(face) ELSE face) as face, known_face FROM ( SELECT original_img, img_id, recognize_faces(original_img) as (total_faces, face) FROM ( SELECT original_img, img_id FROM image_source ) OUTER CHROMA JOIN ( SELECT known_face FROM known_faces ) WHERE cosine(face, known_face) < 0.1 ) ) GROUP BY img_id HAVING COUNT(*) = len(first_nonnull(total_faces))",
+    "operators":[
+        {
+            "kind": "udf_source",
+            "name": "image_source",
+            "id": 0
+        },
+        {
+            "description":"recognize_faces(original_img) as (total_faces, face)",
+            "kind": "inline_python_script",
+            "id": 1,
+            "source": 0,
+            "scripts_dir_path": "./python_scripts",
+            "script_name": "detect_inline_deployment",
+            "function_name": "detect",
+            "encode_fn": {
+                "kind": "python_values",
+                "fields": ["python_image"]
+            },
+            "decode_fn": {
+                "kind": "python_value",
+                "output_fields": ["bounding_boxes", "boxes_detected"]
+            }
+        },
+        {
+            "description": "use routing_fn to decide which embedding model to use",
+            "kind": "channel_router",
+            "id": 2,
+            "source": 1,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "original_width"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "original_height"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "total_faces"
+                    }
+                ]
+            },
+            "routes": [3, 8, 13]
+        },
+        {
+            "description": "route 0, use buffalo_s",
+            "kind": "channel_spout",
+            "id": 3,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "embed face",
+            "kind": "inline_python_script",
+            "id": 4,
+            "source": 3,
+            "scripts_dir_path": "./python_scripts",
+            "script_name": "embed_inline_deployment__buffalo_s",
+            "function_name": "embed",
+            "encode_fn": {
+                "kind": "python_values",
+                "fields": ["image", "bounding_boxes"]
+            },
+            "decode_fn": {
+                "kind": "custom",
+                "function_name": "decode_embeddings_inline",
+                "output_fields": ["embeddings"]
+            }
+        },
+        {
+            "description": "build side of the join",
+            "kind": "udf_source",
+            "name": "known_faces",
+            "id": 5
+        },
+        {
+            "kind": "chroma_join",
+            "id": 6,
+            "lookup_stream": 4,
+            "index_stream": 5,
+            "metric": "euclidean",
+            "url": "http://localhost:8000",
+            "collection": "buffalo_s_normalized",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "outer_right",
+                "topk": 1,
+                "keep_n_matches": 1
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 7,
+            "source": 6,
+            "parent": 18,
+            "on_merge_fn": "merge_callback_buffalo_s"
+        },
+        
+
+        
+        {
+            "description": "route 1, use buffalo_l",
+            "kind": "channel_spout",
+            "id": 8,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "embed face",
+            "kind": "inline_python_script",
+            "id": 9,
+            "source": 8,
+            "scripts_dir_path": "./python_scripts",
+            "script_name": "embed_inline_deployment__buffalo_l",
+            "function_name": "embed",
+            "encode_fn": {
+                "kind": "python_values",
+                "fields": ["python_image", "bounding_boxes"]
+            },
+            "decode_fn": {
+                "kind": "custom",
+                "function_name": "decode_embeddings_inline",
+                "output_fields": ["embeddings"]
+            }
+        },
+        {
+            "description": "build side of the join",
+            "kind": "udf_source",
+            "name": "known_faces",
+            "id": 10
+        },
+        {
+            "kind": "chroma_join",
+            "id": 11,
+            "lookup_stream": 9,
+            "index_stream": 10,
+            "metric": "euclidean",
+            "url": "http://localhost:8000",
+            "collection": "buffalo_l_normalized",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "outer_right",
+                "topk": 1,
+                "keep_n_matches": 1
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 12,
+            "source": 11,
+            "parent": 18,
+            "on_merge_fn": "merge_callback_buffalo_l"
+        },
+
+
+        
+        {
+            "description": "route 2, use facenet",
+            "kind": "channel_spout",
+            "id": 13,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "embed face",
+            "kind": "inline_python_script",
+            "id": 14,
+            "source": 13,
+            "scripts_dir_path": "./python_scripts",
+            "script_name": "embed_inline_deployment__facenet",
+            "function_name": "embed",
+            "encode_fn": {
+                "kind": "python_values",
+                "fields": ["python_image", "bounding_boxes"]
+            },
+            "decode_fn": {
+                "kind": "custom",
+                "function_name": "decode_embeddings_inline",
+                "output_fields": ["embeddings"]
+            }
+        },
+        {
+            "description": "build side of the join",
+            "kind": "udf_source",
+            "name": "known_faces",
+            "id": 15
+        },
+        {
+            "kind": "chroma_join",
+            "id": 16,
+            "lookup_stream": 14,
+            "index_stream": 15,
+            "metric": "euclidean",
+            "url": "http://localhost:8000",
+            "collection": "facenet_normalized",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "outer_right",
+                "topk": 1,
+                "keep_n_matches": 1
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 17,
+            "source": 16,
+            "parent": 18,
+            "on_merge_fn": "merge_callback_facenet"
+        },
+
+
+        {
+            "kind": "merge_spout",
+            "id": 18,
+            "sources": [7, 12, 17],
+            "timeout": 10
+        },
+
+        
+        {
+            "kind": "group_by",
+            "description": "combines faces together and blurs the ones that are nulls",
+            "id": 19,
+            "source": 18,
+            "fields": ["match_ids"],
+            "aggregate": {
+                "kind": "udf",
+                "name": "blur_known_faces"
+            }
+        }
+    ]
+}

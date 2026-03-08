@@ -1,0 +1,126 @@
+{
+    "name": "Simple Test Query 4",
+    "description": "This is the fourth test query just to see if we can execute simple expressions. This one tests routing, which is not really reflected in the SQL query.",
+    "sql_form": "SELECT field1, field2 % 2 as route_number FROM table1",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "derive",
+            "id": 1,
+            "source": 0,
+            "new_field_name": "route_number",
+            "expression": {
+                "kind": "binary",
+                "op": "%",
+                "left": {
+                    "kind": "field",
+                    "source": 0,
+                    "name": "field1"
+                },
+                "right": {
+                    "kind": "literal",
+                    "type": "int",
+                    "value": 2
+                }
+            }
+        },
+        {
+            "description": "here's the routing, which didn't appear in the SQL form. channel router, use udf routing_fn",
+            "kind": "channel_router",
+            "id": 2,
+            "source": 1,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "route_number" 
+                    }
+                ]
+            },
+            "routes":[3, 6]
+        },
+        {
+            "description": "route 0, udf log0, receive data",
+            "kind": "channel_spout",
+            "id": 3,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "logging function",
+            "kind": "derive",
+            "id": 4,
+            "source": 3,
+            "new_field_name": "log_output",
+            "expression": {
+                "kind": "udf",
+                "name": "log0",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "field1"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "route_number"
+                    }
+                ]
+            }
+        },
+        {
+            "description": "send back to main thread",
+            "kind": "merge",
+            "id": 5,
+            "source": 4,
+            "parent": 9
+        },
+        {
+            "description": "route 1, udf log1, receive data",
+            "kind": "channel_spout",
+            "id": 6,
+            "source": 2,
+            "timeout": 10
+        },
+        {
+            "description": "logging function",
+            "kind": "derive",
+            "id": 7,
+            "source": 6,
+            "new_field_name": "log_output",
+            "expression": {
+                "kind": "udf",
+                "name": "log1",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "field1"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "route_number"
+                    }
+                ]
+            }
+        },
+        {
+            "description": "send back to main thread",
+            "kind": "merge",
+            "id": 8,
+            "source": 7,
+            "parent": 9
+        },
+        {
+            "description":"merge back to main thread",
+            "kind": "merge_spout",
+            "id": 9,
+            "sources": [5, 8],
+            "timeout": 10
+        }
+    ]
+}

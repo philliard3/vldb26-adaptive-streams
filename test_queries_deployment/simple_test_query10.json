@@ -1,0 +1,21 @@
+{
+    "name": "Simple Test Query 10",
+    "description": "This tests that the python remote execution operator works.",
+    "sql_form": "SELECT double(field) FROM table1",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "python_udf",
+            "id": 1,
+            "source": 0,
+            "script_path": "double",
+            "encode_fn": "encode_int",
+            "decode_fn": "decode_int",
+            "shutdown_fn": "shutdown_int"
+        }
+    ]
+}

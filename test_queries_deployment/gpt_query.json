@@ -1,0 +1,155 @@
+{
+    "name": "GPT Query",
+    "description": "This is the query which embeds a question, looks it up against a knowledge base, and then combines the result to send to GPT, returning the answer.",
+    "sql_form": "SELECT is_yes(gpt_response), gpt_response FROM (SELECT gpt(finalize_question(question, passages)) as gpt_response FROM question_source JOIN knowledge_base ON embed(question) TOPK embed(passage) as passages)",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "question_source",
+            "id": 0
+        },
+        {
+            "kind": "derive",
+            "id": 1,
+            "source": 0,
+            "new_field_name": "question_embedding",
+            "expression": {
+                "kind": "udf",
+                "name": "embed",
+                "args": ["question"]
+            }
+        },
+        {
+            "kind": "udf_source",
+            "name": "knowledge_base",
+            "id": 2
+        },
+        {
+            "kind": "derive",
+            "id": 3,
+            "source": 2,
+            "new_field_name": "knowledge_base_embedding",
+            "expression": {
+                "kind": "udf",
+                "name": "embed",
+                "args": ["passage"]
+            }
+        },
+        {
+            "kind": "chroma_join",
+            "id": 4,
+            "lookup_stream": 1,
+            "index_stream": 3,
+            "metric": "cosine",
+            "url": "0.0.0.0:5000",
+            "collection": "knowledge_base",
+            "distance_threshold": 0.1,
+            "join_info": {
+                "kind": "inner",
+                "topk": 5,
+                "keep_n_matches": 5
+            }
+        },
+        {
+            "kind": "derive",
+            "id": 5,
+            "source": 4,
+            "new_field_name": "query",
+            "expression": {
+                "kind": "udf",
+                "name": "finalize_question",
+                "args": ["question", "passages"]
+            }
+        },
+        {
+            "description": "use routing_fn to decide which GPT model to use",
+            "kind": "channel_router",
+            "id": 6,
+            "source": 5,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "query"
+                    }
+                ]
+            },
+            "routes": [7, 8]
+        },
+        {
+            "description": "route 0, use small GPT model",
+            "kind": "channel_spout",
+            "id": 7,
+            "source": 6,
+            "timeout": 10
+        },
+        {
+            "description": "route 1, use large GPT model",
+            "kind": "channel_spout",
+            "id": 8,
+            "source": 6,
+            "timeout": 10
+        },
+        {
+            "kind": "derive",
+            "id": 9,
+            "source": 7,
+            "new_field_name": "gpt_response",
+            "expression": {
+                "kind": "udf",
+                "name": "gpt_4o_mini",
+                "args": ["query"]
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 10,
+            "source": 9,
+            "parent": 13,
+            "on_merge_fn": "merge_callback_left"
+        },
+        {
+            "kind": "derive",
+            "id": 11,
+            "source": 8,
+            "new_field_name": "gpt_response",
+            "expression": {
+                "kind": "udf",
+                "name": "gpt_4o",
+                "args": ["query"]
+            }
+        },
+        {
+            "kind": "merge",
+            "id": 12,
+            "source": 11,
+            "parent": 13,
+            "on_merge_fn": "merge_callback_right"
+        },
+        {
+            "kind": "merge_spout",
+            "id": 13,
+            "sources": [10, 12],
+            "timeout": 10
+        },
+        {
+            "kind": "derive",
+            "id": 14,
+            "source": 13,
+            "new_field_name": "is_yes(gpt_response)",
+            "expression": {
+                "kind": "udf",
+                "name": "is_yes",
+                "args": ["gpt_response"]
+            }
+        },
+        {
+            "kind": "project",
+            "id": 15,
+            "source": 14,
+            "fields": ["is_yes(gpt_response)", "gpt_response"]
+        }
+    ]
+}

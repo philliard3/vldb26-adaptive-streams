@@ -1,0 +1,56 @@
+{
+    "name": "Face Recognition Query 1",
+    "description": "This is the query that accepts images as input, detects faces in each image, embeds each face, compares each face to a database of known faces, blurs each face that is recognized, and returns the combined blurred image. The group by will ensure that only images will only output when all their faces have been processed.",
+    "sql_form": "SELECT combine_faces(total_faces, original_img, face) as combined_image FROM ( SELECT img_id, original_img, (IF face IS NOT NULL blur(face) ELSE face) as face, known_face FROM ( SELECT original_img, img_id, recognize_faces(original_img) as (total_faces, face) FROM ( SELECT original_img, img_id FROM image_source ) OUTER CHROMA JOIN ( SELECT known_face FROM known_faces ) WHERE cosine(face, known_face) < 0.9 ) ) GROUP BY img_id HAVING COUNT(*) = len(first_nonnull(total_faces))",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "rehydrate_spout",
+            "id": 0
+        },
+        {
+            "kind": "udf",
+            "name": "preprocess_image",
+            "id": 1,
+            "source": 0
+        },
+        {
+            "description": "recognize_faces(original_img) as (total_faces, face)",
+            "kind": "onnx_inference",
+            "id": 2,
+            "source": 1,
+            "model_path": "./models/omz_detect.onnx",
+            "args": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "detect_shape",
+                    "buffer_field": "detect_input"
+                }
+            ],
+            "outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "scores_shape",
+                    "buffer_field": "scores_buffer"
+                },
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "raw_boxes_shape",
+                    "buffer_field": "raw_boxes_buffer"
+                }
+            ]
+        },
+        {
+            "kind": "udf",
+            "name": "postprocess_boxes",
+            "id": 3,
+            "source": 2
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 4,
+            "source": 3
+        }
+    ]
+}

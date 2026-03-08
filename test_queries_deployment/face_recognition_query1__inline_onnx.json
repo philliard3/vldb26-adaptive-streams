@@ -1,0 +1,222 @@
+{
+    "name": "Face Recognition Query 1",
+    "description": "This is the query that accepts images as input, detects faces in each image, embeds each face, compares each face to a database of known faces, blurs each face that is recognized, and returns the combined blurred image. The group by will ensure that only images will only output when all their faces have been processed.",
+    "sql_form": "SELECT combine_faces(total_faces, original_img, face) as combined_image FROM ( SELECT img_id, original_img, (IF face IS NOT NULL blur(face) ELSE face) as face, known_face FROM ( SELECT original_img, img_id, recognize_faces(original_img) as (total_faces, face) FROM ( SELECT original_img, img_id FROM image_source ) OUTER CHROMA JOIN ( SELECT known_face FROM known_faces ) WHERE cosine(face, known_face) < 0.9 ) ) GROUP BY img_id HAVING COUNT(*) = len(first_nonnull(total_faces))",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "image_source",
+            "id": 0
+        },
+        {
+            "kind": "udf",
+            "name": "preprocess_image",
+            "id": 1,
+            "source": 0
+        },
+        {
+            "description": "recognize_faces(original_img) as (total_faces, face)",
+            "kind": "onnx_inference",
+            "id": 2,
+            "source": 1,
+            "single_use_model_path": "./models/omz_detect.onnx",
+            "batch_use_model_path": "./models/omz_detect_batch8.onnx",
+            "model_path": "./models/omz_detect_batch8.onnx",
+            "args": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "detect_shape",
+                    "buffer_field": "detect_input"
+                }
+            ],
+            "outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "scores_shape",
+                    "buffer_field": "scores_buffer"
+                },
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "raw_boxes_shape",
+                    "buffer_field": "raw_boxes_buffer"
+                }
+            ]
+        },
+        {
+            "kind": "udf",
+            "name": "postprocess_boxes",
+            "id": 3,
+            "source": 2
+        },
+        {
+            "description": "use routing_fn to decide which embedding model to use",
+            "kind": "channel_router",
+            "id": 4,
+            "source": 3,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "new_height_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "new_width_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "new_area_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "new_hw_ratio_float"
+                    }
+                ]
+            },
+            "routes": [5, 10],
+            "backup_route": {
+                "kind": "forward_with_values",
+                "merge_spout_position": 15,
+                "values_to_set": [
+                    {
+                        "key": "match_ids",
+                        "value": null
+                    },
+                    {
+                        "key": "closest_distances",
+                        "value": null
+                    }
+                ]
+            }
+        },
+        {
+            "description": "route 0, use buffalo_sc",
+            "kind": "channel_spout",
+            "id": 5,
+            "source": 4,
+            "timeout": 10,
+            "max_age_ns": 1000000000
+        },
+        {
+            "description": "split the data up into the bbs and derive the number of faces to expect",
+            "kind": "udf",
+            "id": 6,
+            "source": 5,
+            "name": "preprocess_bb_after_scheduling_insightface"
+        },
+        {
+            "description": "embed face",
+            "kind": "onnx_inference",
+            "id": 7,
+            "source": 6,
+            "model_path": "./models/buffalo_sc.onnx",
+            "args": [
+                {
+                    "kind": "SplitParts",
+                    "description": "before passing this, crop and resize the image to the size of the model",
+                    "shape_field": "resized_shape",
+                    "buffer_field": "cropped_image"
+                }
+            ],
+            "outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "embedding_shape",
+                    "description": "embedding field is always named embedding and will be used as if it is flat because it must be",
+                    "buffer_field": "embedding"
+                }
+            ]
+        },
+        {
+            "description": "lookup for data from *.npy file for this particular dataset",
+            "kind": "udf",
+            "id": 8,
+            "source": 7,
+            "name": "in_memory_lookup_udf_tiny"
+        },
+        {
+            "kind": "merge",
+            "id": 9,
+            "source": 8,
+            "parent": 15,
+            "on_merge_fn": "merge_callback_buffalo_sc"
+        },
+
+        {
+            "description": "route 1, use facenet",
+            "kind": "channel_spout",
+            "id": 10,
+            "source": 4,
+            "timeout": 10,
+            "max_age_ns": 1000000000
+        },
+        {
+            "description": "split the data up into the bbs and derive the number of faces to expect",
+            "kind": "udf",
+            "id": 11,
+            "source": 10,
+            "name": "preprocess_bb_after_scheduling_facenet"
+        },
+        {
+            "description": "embed face",
+            "kind": "onnx_inference",
+            "id": 12,
+            "source": 11,
+            "model_path": "./models/facenet.onnx",
+            "args": [
+                {
+                    "kind": "SplitParts",
+                    "description": "before passing this, crop and resize the image to the size of the model",
+                    "shape_field": "resized_shape",
+                    "buffer_field": "cropped_image"
+                }
+            ],
+            "outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "embedding_shape",
+                    "description": "embedding field is always named embedding and will be used as if it is flat because it must be",
+                    "buffer_field": "embedding"
+                }
+            ]
+        },
+        {
+            "description": "lookup for data from *.npy file for this particular dataset",
+            "kind": "udf",
+            "id": 13,
+            "source": 12,
+            "name": "in_memory_lookup_udf_huge"
+        },
+        {
+            "kind": "merge",
+            "id": 14,
+            "source": 13,
+            "parent": 15,
+            "on_merge_fn": "merge_callback_facenet"
+        },
+
+        {
+            "kind": "merge_spout",
+            "id": 15,
+            "sources": [
+                9,
+                14
+            ],
+            "timeout": 10
+        },
+
+        {
+            "kind": "group_by",
+            "description": "combines faces together and blurs the ones that are nulls",
+            "id": 16,
+            "source": 15,
+            "fields": ["img_id"],
+            "aggregate": {
+                "kind": "udf",
+                "name": "blur_known_faces"
+            }
+        }
+    ]
+}

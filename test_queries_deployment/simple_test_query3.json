@@ -1,0 +1,24 @@
+{
+    "name": "Simple Test Query 3",
+    "description": "This is the third test query just to see if we can execute simple expressions.",
+    "sql_form": "SELECT sum(field1), field3 FROM table1 GROUP BY field3",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "group_by",
+            "id": 1,
+            "source": 0,
+            "fields": ["field3"],
+            "aggregate": {
+                "kind": "builtin",
+                "op": "sum",
+                "field": "field1"
+            }
+        }
+    ],
+    "commented_out": "{\"kind\": \"project\",\"id\": 2,\"source\": 1,\"fields\": [\"sum(field1)\"]}"
+}

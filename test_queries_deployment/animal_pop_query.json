@@ -1,0 +1,193 @@
+{
+    "name": "Animal Species Count Query",
+    "description": "This query accepts images as input, detects and classifies animals in each image using species-specific models, applies softmax to predictions, and counts species occurrences across a sliding window.",
+    "sql_form": "SELECT class_id, COUNT(*) as species_count FROM ( SELECT img_id, class_id, probability FROM ( SELECT img_id, class_id, probability FROM ( SELECT img_id, softmax(predictions) as (class_id, probability) FROM ( SELECT img_id, extract_image_info(original_img) as original_img FROM image_source ) OUTER CHROMA JOIN ( SELECT model_prediction FROM animal_models ) ) ) GROUP BY class_id",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "image_source",
+            "id": 0
+        },
+        {
+            "kind": "udf",
+            "name": "extract_image_info",
+            "id": 1,
+            "source": 0
+        },
+        {
+            "description": "use routing_fn to decide which animal model to use",
+            "kind": "channel_router",
+            "id": 2,
+            "source": 1,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "height_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "width_float"
+                    }
+                ]
+            },
+            "routes": [3, 7],
+            "backup_route": {
+                "kind": "drop"
+            },
+            "backup_route__unused__null_val": {
+                "unused_reason": "if we are only using counts then dropping is the same as forwarding nulls, since nulls won't contribute to counts",
+                "kind": "forward_with_values",
+                "merge_spout_position": 9,
+                "values_to_set": [
+                    {
+                        "key": "predictions",
+                        "value": null
+                    }
+                ]
+            }
+        },
+        {
+            "description": "route 0, use animal_model_v1",
+            "kind": "channel_spout",
+            "id": 3,
+            "source": 2,
+            "timeout": 10,
+            "max_age_ns": 1000000000
+        },
+        {
+            "description": "detect and classify animals",
+            "kind": "onnx_inference",
+            "id": 4,
+            "source": 3,
+            "model_path": "./yolo_m1.onnx",
+            "args": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "input_shape",
+                    "buffer_field": "image_buffer"
+                }
+            ],
+            "output_descriptions": ["node 1810 dims [1, 100, 92]", "node 1811 dims [1, 100, 4]", "onnx slice tensor: float32[1,1445,192]"],
+            "outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "outputs_shape",
+                    "buffer_field": "outputs"
+                }
+            ],
+            "unused_outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "prediction_logits_shape",
+                    "buffer_field": "prediction_logits"
+                },
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "prediction_boxes_shape",
+                    "buffer_field": "prediction_boxes"
+                },
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "unknown_slice_shape",
+                    "buffer_field": "unknown_slice"
+                }
+            ]
+        },
+        {
+            "description": "apply softmax to classification results, split into many with class_id and probability",
+            "q": "do we want to threshold here? we may have to so we don't have junk data for 100 bounding boxes when we don't usually have that many. do we also want to filter out low prob results?",
+            "kind": "udf",
+            "id": 5,
+            "source": 4,
+            "name": "split_tuple_yolos"
+        },
+        {
+            "kind": "merge",
+            "id": 6,
+            "source": 5,
+            "parent": 11,
+            "on_merge_fn": "merge_callback_animal_model_v1"
+        },
+        {
+            "description": "route 1, use animal_model_v2",
+            "kind": "channel_spout",
+            "id": 7,
+            "source": 2,
+            "timeout": 10,
+            "max_age_ns": 1000000000
+        },
+        {
+            "description": "detect and classify animals",
+            "kind": "onnx_inference",
+            "id": 8,
+            "source": 7,
+            "model_path": "./yolo_m2.onnx",
+            "args": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "input_shape",
+                    "buffer_field": "image_buffer"
+                }
+            ],
+            "output_descriptions": ["node 1810 dims [1, 100, 92]", "node 1811 dims [1, 100, 4]", "onnx slice tensor: float32[1,1445,192]"],
+            "outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "outputs_shape",
+                    "buffer_field": "outputs"
+                }
+            ],
+            "unused_outputs": [
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "prediction_logits_shape",
+                    "buffer_field": "prediction_logits"
+                },
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "prediction_boxes_shape",
+                    "buffer_field": "prediction_boxes"
+                },
+                {
+                    "kind": "SplitParts",
+                    "shape_field": "unknown_slice_shape",
+                    "buffer_field": "unknown_slice"
+                }
+            ]
+        },
+        {
+            "kind": "udf",
+            "id": 9,
+            "source": 8,
+             "description": "apply softmax to classification results, split into many with class_id and probability",
+            "name": "split_tuple_yolos"
+        },
+        {
+            "kind": "merge",
+            "id": 10,
+            "source": 9,
+            "parent": 11,
+            "on_merge_fn": "merge_callback_animal_model_v2"
+        },
+        {
+            "kind": "merge_spout",
+            "id": 11,
+            "sources": [6, 10],
+            "timeout": 10
+        },
+        {
+            "kind": "group_by",
+            "description": "count species occurrences in sliding window",
+            "id": 12,
+            "source": 11,
+            "fields": ["class_id"],
+            "aggregate": {
+                "kind": "udf",
+                "name": "aggregate_count_species"
+            }
+        }
+    ]
+}

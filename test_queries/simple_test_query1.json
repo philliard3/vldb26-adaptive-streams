@@ -1,0 +1,57 @@
+{
+    "name": "Simple Test Query 1",
+    "description": "This is the first test query just to see if we can execute simple expressions.",
+    "sql_form": "SELECT field1 + field2 * 5 fROM table1 WHERE field3 = 4",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "filter",
+            "id": 1,
+            "source": 0,
+            "predicate": {
+                "kind": "binary",
+                "op": "=",
+                "left": {
+                    "kind": "field",
+                    "name": "field3"
+                },
+                "right": {
+                    "kind": "literal",
+                    "type": "int",
+                    "value": 4
+                }
+            }
+        },
+        {
+            "kind": "derive",
+            "id": 2,
+            "source": 1,
+            "new_field_name": "__derived_field0",
+            "expression": {
+                "kind": "binary",
+                "op": "+",
+                "left": {
+                    "kind": "field",
+                    "name": "field1"
+                },
+                "right": {
+                    "kind": "binary",
+                    "op": "*",
+                    "left": {
+                        "kind": "field",
+                        "name": "field2"
+                    },
+                    "right": {
+                        "kind": "literal",
+                        "type": "int",
+                        "value": 5
+                    }
+                }
+            }
+        }
+    ]
+}

@@ -1,0 +1,139 @@
+{
+    "name": "Face Performance Analysis Subquery 4",
+    "description": "This measures the overall overhead of the system by only using no-op counter udfs and using the same number of operators as the full face recognition query.",
+    "sql_form": "SELECT combine_faces(total_faces, original_img, face) as combined_image FROM ( SELECT img_id, original_img, (IF face IS NOT NULL blur(face) ELSE face) as face, known_face FROM ( SELECT original_img, img_id, recognize_faces(original_img) as (total_faces, face) FROM ( SELECT original_img, img_id FROM image_source ) OUTER CHROMA JOIN ( SELECT known_face FROM known_faces ) WHERE cosine(face, known_face) < 0.9 ) ) GROUP BY img_id HAVING COUNT(*) = len(first_nonnull(total_faces))",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "rehydrate_spout",
+            "id": 0
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 1,
+            "source": 0
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 2,
+            "source": 1
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 3,
+            "source": 2
+        },
+        {
+            "description": "use routing_fn to decide which embedding model to use",
+            "kind": "channel_router",
+            "id": 4,
+            "source": 3,
+            "route_expression": {
+                "kind": "udf",
+                "name": "routing_fn",
+                "args": [
+                    {
+                        "kind": "field",
+                        "name": "original_height_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "original_width_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "original_area_float"
+                    },
+                    {
+                        "kind": "field",
+                        "name": "original_hw_ratio_float"
+                    }
+                ]
+            },
+            "routes": [5, 10]
+        },
+        {
+            "description": "route 0, use buffalo_sc",
+            "kind": "channel_spout",
+            "id": 5,
+            "source": 4,
+            "timeout": 10
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 6,
+            "source": 5
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 7,
+            "source": 6
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 8,
+            "source": 7
+        },
+        {
+            "kind": "merge",
+            "id": 9,
+            "source": 8,
+            "parent": 15,
+            "on_merge_fn": "merge_callback_buffalo_sc"
+        },
+        {
+            "description": "route 1, use facenet",
+            "kind": "channel_spout",
+            "id": 10,
+            "source": 4,
+            "timeout": 10
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 11,
+            "source": 10
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 12,
+            "source": 11
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 13,
+            "source": 12
+        },
+        {
+            "kind": "merge",
+            "id": 14,
+            "source": 13,
+            "parent": 15,
+            "on_merge_fn": "merge_callback_facenet"
+        },
+
+        {
+            "kind": "merge_spout",
+            "id": 15,
+            "sources": [
+                9,
+                14
+            ],
+            "timeout": 10
+        },
+        {
+            "kind": "udf",
+            "name": "no_op_counter",
+            "id": 16,
+            "source": 15
+        }
+    ]
+}

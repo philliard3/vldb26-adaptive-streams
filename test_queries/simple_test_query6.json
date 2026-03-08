@@ -1,0 +1,41 @@
+{
+    "name": "Simple Test Query 6",
+    "description": "This is the sixth test query just to see if we can execute simple expressions. This one inserts things into the DB on one side and returns data regardless of whether a lookup matches or not.", 
+    "sql_form": "SELECT name, last_accessed, patient_id FROM table1 OUTER JOIN table2 ON table1.patient_id = table2.patient_id",
+    "operators": [
+        {
+            "kind": "udf_source",
+            "name": "table1",
+            "id": 0
+        },
+        {
+            "kind": "udf_source",
+            "name": "table2",
+            "id": 1
+        },
+        {
+            "kind": "join",
+            "id": 2,
+            "left": 0,
+            "right": 1,
+            "predicate": {
+                "kind": "udf",
+                "name": "always_true",
+                "args": []
+            },
+            "type": "outer",
+            "join_info": {
+                "kind":"outer_build_right",
+                "fields":["patient_id"]
+            }
+
+        },
+        {
+            "kind": "project",
+            "description": "project name, last_accessed, patient_id",
+            "id": 3,
+            "source": 2,
+            "fields": ["name", "last_accessed", "patient_id"]
+        }
+    ]
+}

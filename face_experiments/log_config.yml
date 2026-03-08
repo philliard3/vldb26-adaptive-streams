@@ -1,0 +1,34 @@
+
+# refresh_rate: 1 seconds
+# refresh_rate:
+#   stdout: 1 second
+#   file: 100 ms
+# refresh_rate: 100 ms
+refresh_rate: 500 ms
+
+appenders:
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{d} - {l} - {M}:{L} - {m}{n}"
+
+  file:
+    kind: file
+    path: "log/output.log"
+    encoder:
+      pattern: "{d} - {l} - {M}:{L} - {m}{n}"
+
+root:
+  level: info
+  # level: trace
+  # level: debug
+  appenders:
+    - stdout
+    - file
+
+# loggers:
+#   my_crate::some_module:
+#     level: debug
+#     appenders:
+#       - file
+#     additive: false
